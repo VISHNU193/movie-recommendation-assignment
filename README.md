@@ -22,8 +22,7 @@ A simple Android app that lets you browse popular movies, search for titles, and
 
 ## A note about the API key
 
-I know that adding the API key directly in the project is insecure, but due to time constraint I wasn't able to build an API server that would handle authentication. For a production app, you'd want to proxy requests through your own backend server.
-
+I know that adding the API key directly in the project is insecure, but due to time constraint I wasn't able to build an API server that would handle authentication.
 ## Getting Started
 
 ### Prerequisites
