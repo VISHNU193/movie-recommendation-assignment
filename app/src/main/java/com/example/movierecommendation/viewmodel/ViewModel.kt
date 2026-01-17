@@ -16,16 +16,26 @@ sealed class UiState<out T> {
     data class Error(val message: String) : UiState<Nothing>()
 }
 
+data class PaginatedMovies(
+    val movies: List<Movie> = emptyList(),
+    val currentPage: Int = 0,
+    val totalPages: Int = 1,
+    val isLoadingMore: Boolean = false,
+    val hasMorePages: Boolean = true
+)
+
 class MoviesViewModel(private val repository: MovieRepository) : ViewModel() {
 
-    private val _popular = MutableStateFlow<UiState<List<Movie>>>(UiState.Loading)
-    val popular: StateFlow<UiState<List<Movie>>> = _popular.asStateFlow()
+    private val _popular = MutableStateFlow<UiState<PaginatedMovies>>(UiState.Loading)
+    val popular: StateFlow<UiState<PaginatedMovies>> = _popular.asStateFlow()
 
     private val _movieDetail = MutableStateFlow<UiState<MovieDetail>>(UiState.Loading)
     val movieDetail: StateFlow<UiState<MovieDetail>> = _movieDetail.asStateFlow()
 
     val favorites = repository.favorites().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val watchlist = repository.watchlist().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    private var isLoadingMore = false
 
     init {
         loadPopular()
@@ -35,10 +45,55 @@ class MoviesViewModel(private val repository: MovieRepository) : ViewModel() {
         viewModelScope.launch {
             _popular.value = UiState.Loading
             try {
-                val res = repository.getPopular()
-                _popular.value = UiState.Success(res.results)
+                val res = repository.getPopular(page = 1)
+                _popular.value = UiState.Success(
+                    PaginatedMovies(
+                        movies = res.results,
+                        currentPage = res.page,
+                        totalPages = res.total_pages,
+                        isLoadingMore = false,
+                        hasMorePages = res.page < res.total_pages
+                    )
+                )
             } catch (e: Exception) {
                 _popular.value = UiState.Error(e.localizedMessage ?: "Unknown error")
+            }
+        }
+    }
+
+    fun loadMorePopular() {
+        val currentState = _popular.value
+        if (currentState !is UiState.Success) return
+        if (isLoadingMore) return
+        if (!currentState.data.hasMorePages) return
+
+        isLoadingMore = true
+        val nextPage = currentState.data.currentPage + 1
+
+        // Update state to show loading indicator
+        _popular.value = UiState.Success(currentState.data.copy(isLoadingMore = true))
+
+        viewModelScope.launch {
+            try {
+                val res = repository.getPopular(page = nextPage)
+                // Filter out duplicates by ID
+                val existingIds = currentState.data.movies.map { it.id }.toSet()
+                val newMovies = res.results.filter { it.id !in existingIds }
+                val updatedMovies = currentState.data.movies + newMovies
+                _popular.value = UiState.Success(
+                    PaginatedMovies(
+                        movies = updatedMovies,
+                        currentPage = res.page,
+                        totalPages = res.total_pages,
+                        isLoadingMore = false,
+                        hasMorePages = res.page < res.total_pages
+                    )
+                )
+            } catch (e: Exception) {
+                // Keep existing data but stop loading
+                _popular.value = UiState.Success(currentState.data.copy(isLoadingMore = false))
+            } finally {
+                isLoadingMore = false
             }
         }
     }

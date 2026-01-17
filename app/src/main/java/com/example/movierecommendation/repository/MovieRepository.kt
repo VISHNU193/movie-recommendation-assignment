@@ -10,8 +10,8 @@ class MovieRepository(private val dao: MovieDao) {
 
     private val api = TmdbService.api
 
-    suspend fun getPopular() = api.popular()
-    suspend fun search(query: String) = api.search(query)
+    suspend fun getPopular(page: Int = 1) = api.popular(page = page)
+    suspend fun search(query: String, page: Int = 1) = api.search(query, page = page)
     suspend fun getMovieDetails(id: Int) = api.movieDetails(id)
     suspend fun getRecommendations(id: Int) = api.recommendations(id)
     suspend fun getSimilar(id: Int) = api.similar(id)

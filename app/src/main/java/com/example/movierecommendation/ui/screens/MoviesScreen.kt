@@ -4,8 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -33,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.movierecommendation.network.Movie
 import com.example.movierecommendation.viewmodel.MoviesViewModel
+import com.example.movierecommendation.viewmodel.PaginatedMovies
 import com.example.movierecommendation.viewmodel.UiState
 
 private val genreMap = mapOf(
@@ -70,15 +73,43 @@ fun MoviesScreen(
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<UiState<List<Movie>>?>(null) }
     val focusManager = LocalFocusManager.current
+    val gridState = rememberLazyGridState()
 
     val favoriteIds = favorites.map { it.id }.toSet()
     val watchlistIds = watchlist.map { it.id }.toSet()
+
+    // Infinite scroll detection
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val layoutInfo = gridState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleItemIndex = (layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) + 1
+            
+            // Load more when we're 6 items away from the end
+            lastVisibleItemIndex > (totalItems - 6) && totalItems > 0
+        }
+    }
+
+    // Trigger load more when scrolled near the end
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore && searchResults == null) {
+            viewModel.loadMorePopular()
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
+        // Page Title
+        Text(
+            text = if (searchResults != null) "Search Results" else "Popular Movies",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)
+        )
+        
         // Search Bar
         OutlinedTextField(
             value = searchQuery,
@@ -121,49 +152,104 @@ fun MoviesScreen(
             )
         )
 
-        // Display content based on search or popular
-        val displayState = searchResults ?: popularState
-
-        when (displayState) {
-            is UiState.Loading -> {
-                LoadingState()
-            }
-            is UiState.Error -> {
-                ErrorState(message = displayState.message) {
-                    if (searchQuery.isNotBlank()) {
-                        viewModel.search(searchQuery) { searchResults = it }
+        // Display search results if searching
+        if (searchResults != null) {
+            when (val state = searchResults) {
+                is UiState.Loading -> LoadingState()
+                is UiState.Error -> ErrorState(message = state.message) {
+                    viewModel.search(searchQuery) { searchResults = it }
+                }
+                is UiState.Success -> {
+                    val movies = state.data
+                    if (movies.isEmpty()) {
+                        EmptyState(message = "No movies found for \"$searchQuery\"")
                     } else {
-                        viewModel.loadPopular()
+                        MovieGrid(
+                            movies = movies,
+                            favoriteIds = favoriteIds,
+                            watchlistIds = watchlistIds,
+                            onMovieClick = onMovieClick,
+                            onFavoriteClick = { viewModel.toggleFavorite(it) },
+                            onWatchlistClick = { viewModel.toggleWatchlist(it) },
+                            isLoadingMore = false,
+                            gridState = gridState
+                        )
+                    }
+                }
+                null -> {}
+            }
+        } else {
+            // Display popular movies with pagination
+            when (val state = popularState) {
+                is UiState.Loading -> LoadingState()
+                is UiState.Error -> ErrorState(message = state.message) {
+                    viewModel.loadPopular()
+                }
+                is UiState.Success -> {
+                    val paginatedData = state.data
+                    if (paginatedData.movies.isEmpty()) {
+                        EmptyState(message = "No movies available")
+                    } else {
+                        MovieGrid(
+                            movies = paginatedData.movies,
+                            favoriteIds = favoriteIds,
+                            watchlistIds = watchlistIds,
+                            onMovieClick = onMovieClick,
+                            onFavoriteClick = { viewModel.toggleFavorite(it) },
+                            onWatchlistClick = { viewModel.toggleWatchlist(it) },
+                            isLoadingMore = paginatedData.isLoadingMore,
+                            gridState = gridState
+                        )
                     }
                 }
             }
-            is UiState.Success -> {
-                val movies = displayState.data
-                if (movies.isEmpty()) {
-                    EmptyState(
-                        message = if (searchQuery.isNotBlank()) 
-                            "No movies found for \"$searchQuery\"" 
-                        else 
-                            "No movies available"
-                    )
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(movies) { movie ->
-                            MovieCard(
-                                movie = movie,
-                                isFavorite = favoriteIds.contains(movie.id),
-                                isInWatchlist = watchlistIds.contains(movie.id),
-                                onMovieClick = { onMovieClick(movie.id) },
-                                onFavoriteClick = { viewModel.toggleFavorite(movie) },
-                                onWatchlistClick = { viewModel.toggleWatchlist(movie) }
-                            )
-                        }
-                    }
+        }
+    }
+}
+
+@Composable
+private fun MovieGrid(
+    movies: List<Movie>,
+    favoriteIds: Set<Int>,
+    watchlistIds: Set<Int>,
+    onMovieClick: (Int) -> Unit,
+    onFavoriteClick: (Movie) -> Unit,
+    onWatchlistClick: (Movie) -> Unit,
+    isLoadingMore: Boolean,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        state = gridState,
+        contentPadding = PaddingValues(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(
+            count = movies.size,
+            key = { index -> "${movies[index].id}_$index" }
+        ) { index ->
+            val movie = movies[index]
+            MovieCard(
+                movie = movie,
+                isFavorite = favoriteIds.contains(movie.id),
+                isInWatchlist = watchlistIds.contains(movie.id),
+                onMovieClick = { onMovieClick(movie.id) },
+                onFavoriteClick = { onFavoriteClick(movie) },
+                onWatchlistClick = { onWatchlistClick(movie) }
+            )
+        }
+        
+        // Loading indicator at the bottom
+        if (isLoadingMore) {
+            item(span = { GridItemSpan(2) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(32.dp))
                 }
             }
         }
