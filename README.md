@@ -2,6 +2,10 @@
 
 A simple Android app that lets you browse popular movies, search for titles, and keep track of your favorites and watchlist. Built with Kotlin and Jetpack Compose.
 
+## App Demo Video
+
+https://github.com/VISHNU193/movie-recommendation-assignment/blob/main/docs/videos/Screenrecording_20260117_210439.mp4
+
 ## What it does
 
 - Browse popular movies from TMDB
