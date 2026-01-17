@@ -3,7 +3,11 @@ package com.example.movierecommendation.ui.screens
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -30,11 +34,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.movierecommendation.R
 import com.example.movierecommendation.network.MovieDetail
 import com.example.movierecommendation.viewmodel.MoviesViewModel
 import com.example.movierecommendation.viewmodel.UiState
+import kotlinx.coroutines.launch
 
 private const val CHANNEL_ID = "movie_playing_channel"
 
@@ -48,9 +54,23 @@ fun MovieDetailScreen(
     val detailState by viewModel.movieDetail.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
     val watchlist by viewModel.watchlist.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     
     val isFavorite = favorites.any { it.id == movieId }
     val isInWatchlist = watchlist.any { it.id == movieId }
+
+    // Permission launcher for notifications (Android 13+)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            val movie = (detailState as? UiState.Success<MovieDetail>)?.data
+            movie?.let {
+                showMoviePlayingNotification(context, it.title ?: "Movie")
+            }
+        }
+    }
 
     LaunchedEffect(movieId) {
         viewModel.loadMovieDetail(movieId)
@@ -61,28 +81,54 @@ fun MovieDetailScreen(
         createNotificationChannel(context)
     }
 
-    when (detailState) {
-        is UiState.Loading -> {
-            LoadingState()
-        }
-        is UiState.Error -> {
-            ErrorState(message = (detailState as UiState.Error).message) {
-                viewModel.loadMovieDetail(movieId)
-            }
-        }
-        is UiState.Success -> {
-            val movie = (detailState as UiState.Success<MovieDetail>).data
-            MovieDetailContent(
-                movie = movie,
-                isFavorite = isFavorite,
-                isInWatchlist = isInWatchlist,
-                onBack = onBack,
-                onFavoriteClick = { viewModel.toggleFavoriteFromDetail(movie) },
-                onWatchlistClick = { viewModel.toggleWatchlistFromDetail(movie) },
-                onPlayClick = {
-                    showMoviePlayingNotification(context, movie.title ?: "Movie")
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { paddingValues ->
+        Box(modifier = Modifier.padding(paddingValues)) {
+            when (detailState) {
+                is UiState.Loading -> {
+                    LoadingState()
                 }
-            )
+                is UiState.Error -> {
+                    ErrorState(message = (detailState as UiState.Error).message) {
+                        viewModel.loadMovieDetail(movieId)
+                    }
+                }
+                is UiState.Success -> {
+                    val movie = (detailState as UiState.Success<MovieDetail>).data
+                    MovieDetailContent(
+                        movie = movie,
+                        isFavorite = isFavorite,
+                        isInWatchlist = isInWatchlist,
+                        onBack = onBack,
+                        onFavoriteClick = { viewModel.toggleFavoriteFromDetail(movie) },
+                        onWatchlistClick = { viewModel.toggleWatchlistFromDetail(movie) },
+                        onPlayClick = {
+                            // Show in-app Snackbar notification
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    message = "🎬 ${movie.title ?: "Movie"} is Playing",
+                                    duration = SnackbarDuration.Short
+                                )
+                            }
+                            // Also try to show system notification
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                if (ContextCompat.checkSelfPermission(
+                                        context,
+                                        android.Manifest.permission.POST_NOTIFICATIONS
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    showMoviePlayingNotification(context, movie.title ?: "Movie")
+                                } else {
+                                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            } else {
+                                showMoviePlayingNotification(context, movie.title ?: "Movie")
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 }
