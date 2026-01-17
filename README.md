@@ -4,7 +4,7 @@ A simple Android app that lets you browse popular movies, search for titles, and
 
 ## App Demo Video
 
-https://github.com/VISHNU193/movie-recommendation-assignment/blob/main/docs/videos/Screenrecording_20260117_210439.mp4
+https://github.com/user-attachments/assets/274a2897-6104-4585-a875-285cf2006217
 
 ## What it does
 
